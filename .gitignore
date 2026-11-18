@@ -1,0 +1,4 @@
+node_modules/
+*.log
+/view.png
+/view.gif
