@@ -1,0 +1,58 @@
+diff --git a/node_modules/prismarine-viewer/viewer/lib/viewer.js b/node_modules/prismarine-viewer/viewer/lib/viewer.js
+index 8be8c5f..a27da7a 100644
+--- a/node_modules/prismarine-viewer/viewer/lib/viewer.js
++++ b/node_modules/prismarine-viewer/viewer/lib/viewer.js
+@@ -7,7 +7,7 @@ const { getVersion } = require('./version')
+ const { Vec3 } = require('vec3')
+ 
+ class Viewer {
+-  constructor (renderer) {
++  constructor (renderer, { numWorkers } = {}) {
+     this.scene = new THREE.Scene()
+     this.scene.background = new THREE.Color('lightblue')
+ 
+@@ -22,7 +22,7 @@ class Viewer {
+     const size = renderer.getSize(new THREE.Vector2())
+     this.camera = new THREE.PerspectiveCamera(75, size.x / size.y, 0.1, 1000)
+ 
+-    this.world = new WorldRenderer(this.scene)
++    this.world = new WorldRenderer(this.scene, numWorkers)
+     this.entities = new Entities(this.scene)
+     this.primitives = new Primitives(this.scene, this.camera)
+ 
+diff --git a/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js b/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js
+index 7f3df40..146b224 100644
+--- a/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js
++++ b/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js
+@@ -12,6 +12,7 @@ function mod (x, n) {
+ 
+ class WorldRenderer {
+   constructor (scene, numWorkers = 4) {
++    this.geometryHook = null // optional (geometry, data.geometry) => void, run on every new section mesh
+     this.sectionMeshs = {}
+     this.active = false
+     this.version = undefined
+@@ -46,6 +47,7 @@ class WorldRenderer {
+           const chunkCoords = data.key.split(',')
+           if (!this.loadedChunks[chunkCoords[0] + ',' + chunkCoords[2]]) return
+ 
++          if (data.geometry.positions.length === 0) return // empty section: nothing to draw
+           const geometry = new THREE.BufferGeometry()
+           geometry.setAttribute('position', new THREE.BufferAttribute(data.geometry.positions, 3))
+           geometry.setAttribute('normal', new THREE.BufferAttribute(data.geometry.normals, 3))
+@@ -53,6 +55,7 @@ class WorldRenderer {
+           geometry.setAttribute('uv', new THREE.BufferAttribute(data.geometry.uvs, 2))
+           geometry.setIndex(data.geometry.indices)
+ 
++          if (this.geometryHook) this.geometryHook(geometry, data.geometry)
+           mesh = new THREE.Mesh(geometry, this.material)
+           mesh.position.set(data.geometry.sx, data.geometry.sy, data.geometry.sz)
+           this.sectionMeshs[data.key] = mesh
+@@ -74,6 +77,7 @@ class WorldRenderer {
+     for (const mesh of Object.values(this.sectionMeshs)) {
+       this.scene.remove(mesh)
+     }
++    this.geometryHook = null // optional (geometry, data.geometry) => void, run on every new section mesh
+     this.sectionMeshs = {}
+     for (const worker of this.workers) {
+       worker.postMessage({ type: 'reset' })

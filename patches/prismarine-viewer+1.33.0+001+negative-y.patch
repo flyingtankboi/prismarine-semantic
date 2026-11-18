@@ -1,0 +1,105 @@
+diff --git a/node_modules/prismarine-viewer/viewer/lib/models.js b/node_modules/prismarine-viewer/viewer/lib/models.js
+index 9f8938e..7517058 100644
+--- a/node_modules/prismarine-viewer/viewer/lib/models.js
++++ b/node_modules/prismarine-viewer/viewer/lib/models.js
+@@ -130,7 +130,7 @@ function renderLiquid (world, cursor, texture, type, biome, water, attr) {
+     if (!neighbor) continue
+     if (neighbor.type === type) continue
+     if ((neighbor.isCube && !isUp) || neighbor.material === 'plant' || neighbor.getProperties().waterlogged) continue
+-    if (neighbor.position.y < 0) continue
++    if (neighbor.position.y < world.minY) continue
+ 
+     let tint = [1, 1, 1]
+     if (water) {
+@@ -241,7 +241,7 @@ function renderElement (world, cursor, element, doAO, attr, globalMatrix, global
+       if (!neighbor) continue
+       if (cullIfIdentical && neighbor.type === block.type) continue
+       if (!neighbor.transparent && neighbor.isCube) continue
+-      if (neighbor.position.y < 0) continue
++      if (neighbor.position.y < world.minY) continue
+     }
+ 
+     const minx = element.from[0]
+diff --git a/node_modules/prismarine-viewer/viewer/lib/worker.js b/node_modules/prismarine-viewer/viewer/lib/worker.js
+index b743167..a2d7837 100644
+--- a/node_modules/prismarine-viewer/viewer/lib/worker.js
++++ b/node_modules/prismarine-viewer/viewer/lib/worker.js
+@@ -32,7 +32,7 @@ function setSectionDirty (pos, value = true) {
+   if (!value) {
+     delete dirtySections[key]
+     postMessage({ type: 'sectionFinished', key })
+-  } else if (chunk && chunk.sections[Math.floor(y / 16)]) {
++  } else if (chunk && chunk.sections[(y - world.minY) >> 4]) {
+     dirtySections[key] = value
+   } else {
+     postMessage({ type: 'sectionFinished', key })
+@@ -74,7 +74,7 @@ setInterval(() => {
+     y = parseInt(y, 10)
+     z = parseInt(z, 10)
+     const chunk = world.getColumn(x, z)
+-    if (chunk && chunk.sections[Math.floor(y / 16)]) {
++    if (chunk && chunk.sections[(y - world.minY) >> 4]) {
+       delete dirtySections[key]
+       const geometry = getSectionGeometry(x, y, z, world, blocksStates)
+       const transferable = [geometry.positions.buffer, geometry.normals.buffer, geometry.colors.buffer, geometry.uvs.buffer]
+diff --git a/node_modules/prismarine-viewer/viewer/lib/world.js b/node_modules/prismarine-viewer/viewer/lib/world.js
+index 269e235..376599b 100644
+--- a/node_modules/prismarine-viewer/viewer/lib/world.js
++++ b/node_modules/prismarine-viewer/viewer/lib/world.js
+@@ -21,6 +21,7 @@ function isCube (shapes) {
+ class World {
+   constructor (version) {
+     this.Chunk = Chunks(version)
++    this.minY = new this.Chunk().minY || 0
+     this.columns = {}
+     this.blockCache = {}
+     this.biomeCache = mcData(version).biomes
+diff --git a/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js b/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js
+index 744224a..79f906b 100644
+--- a/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js
++++ b/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js
+@@ -2,6 +2,7 @@
+ const THREE = require('three')
+ const Vec3 = require('vec3').Vec3
+ const { loadTexture, loadJSON } = globalThis.isElectron ? require('./utils.electron.js') : require('./utils')
++const Chunks = require('prismarine-chunk')
+ const { EventEmitter } = require('events')
+ const { dispose3 } = require('./dispose')
+ 
+@@ -16,6 +17,8 @@ class WorldRenderer {
+     this.version = undefined
+     this.scene = scene
+     this.loadedChunks = {}
++    this.minY = 0
++    this.worldHeight = 256
+     this.sectionsOutstanding = new Set()
+     this.renderUpdateEmitter = new EventEmitter()
+     this.blockStatesData = undefined
+@@ -77,6 +80,9 @@ class WorldRenderer {
+ 
+   setVersion (version) {
+     this.version = version
++    const column = new (Chunks(version))()
++    this.minY = column.minY || 0
++    this.worldHeight = column.worldHeight || 256
+     this.resetWorld()
+     this.active = true
+     for (const worker of this.workers) {
+@@ -112,7 +118,7 @@ class WorldRenderer {
+     for (const worker of this.workers) {
+       worker.postMessage({ type: 'chunk', x, z, chunk })
+     }
+-    for (let y = 0; y < 256; y += 16) {
++    for (let y = this.minY; y < this.minY + this.worldHeight; y += 16) {
+       const loc = new Vec3(x, y, z)
+       this.setSectionDirty(loc)
+       this.setSectionDirty(loc.offset(-16, 0, 0))
+@@ -127,7 +133,7 @@ class WorldRenderer {
+     for (const worker of this.workers) {
+       worker.postMessage({ type: 'unloadChunk', x, z })
+     }
+-    for (let y = 0; y < 256; y += 16) {
++    for (let y = this.minY; y < this.minY + this.worldHeight; y += 16) {
+       this.setSectionDirty(new Vec3(x, y, z), false)
+       const key = `${x},${y},${z}`
+       const mesh = this.sectionMeshs[key]

@@ -1,0 +1,118 @@
+diff --git a/node_modules/prismarine-viewer/viewer/lib/viewer.js b/node_modules/prismarine-viewer/viewer/lib/viewer.js
+index db02d90..8be8c5f 100644
+--- a/node_modules/prismarine-viewer/viewer/lib/viewer.js
++++ b/node_modules/prismarine-viewer/viewer/lib/viewer.js
+@@ -118,8 +118,8 @@ class Viewer {
+     TWEEN.update()
+   }
+ 
+-  async waitForChunksToRender () {
+-    await this.world.waitForChunksToRender()
++  async waitForChunksToRender (timeoutMs) {
++    await this.world.waitForChunksToRender(timeoutMs)
+   }
+ }
+ 
+diff --git a/node_modules/prismarine-viewer/viewer/lib/worker.js b/node_modules/prismarine-viewer/viewer/lib/worker.js
+index a2d7837..1e1eea8 100644
+--- a/node_modules/prismarine-viewer/viewer/lib/worker.js
++++ b/node_modules/prismarine-viewer/viewer/lib/worker.js
+@@ -29,13 +29,12 @@ function setSectionDirty (pos, value = true) {
+   const z = Math.floor(pos.z / 16) * 16
+   const chunk = world.getColumn(x, z)
+   const key = sectionKey(x, y, z)
+-  if (!value) {
+-    delete dirtySections[key]
+-    postMessage({ type: 'sectionFinished', key })
+-  } else if (chunk && chunk.sections[(y - world.minY) >> 4]) {
+-    dirtySections[key] = value
++  const pending = dirtySections[key] ?? 0
++  if (value && chunk && chunk.sections[(y - world.minY) >> 4]) {
++    dirtySections[key] = pending + 1
+   } else {
+-    postMessage({ type: 'sectionFinished', key })
++    delete dirtySections[key]
++    postMessage({ type: 'sectionFinished', key, count: pending + 1 })
+   }
+ }
+ 
+@@ -74,13 +73,14 @@ setInterval(() => {
+     y = parseInt(y, 10)
+     z = parseInt(z, 10)
+     const chunk = world.getColumn(x, z)
++    const count = dirtySections[key]
++    delete dirtySections[key]
+     if (chunk && chunk.sections[(y - world.minY) >> 4]) {
+-      delete dirtySections[key]
+       const geometry = getSectionGeometry(x, y, z, world, blocksStates)
+       const transferable = [geometry.positions.buffer, geometry.normals.buffer, geometry.colors.buffer, geometry.uvs.buffer]
+       postMessage({ type: 'geometry', key, geometry }, transferable)
+     }
+-    postMessage({ type: 'sectionFinished', key })
++    postMessage({ type: 'sectionFinished', key, count })
+   }
+   // const time = performance.now() - start
+   // console.log(`Processed ${sections.length} sections in ${time} ms (${time / sections.length} ms/section)`)
+diff --git a/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js b/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js
+index 79f906b..7f3df40 100644
+--- a/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js
++++ b/node_modules/prismarine-viewer/viewer/lib/worldrenderer.js
+@@ -19,7 +19,7 @@ class WorldRenderer {
+     this.loadedChunks = {}
+     this.minY = 0
+     this.worldHeight = 256
+-    this.sectionsOutstanding = new Set()
++    this.sectionsOutstanding = new Map() // section key -> dirty requests not yet answered by the worker
+     this.renderUpdateEmitter = new EventEmitter()
+     this.blockStatesData = undefined
+     this.texturesDataUrl = undefined
+@@ -58,7 +58,9 @@ class WorldRenderer {
+           this.sectionMeshs[data.key] = mesh
+           this.scene.add(mesh)
+         } else if (data.type === 'sectionFinished') {
+-          this.sectionsOutstanding.delete(data.key)
++          const left = (this.sectionsOutstanding.get(data.key) ?? 0) - (data.count ?? 1)
++          if (left > 0) this.sectionsOutstanding.set(data.key, left)
++          else this.sectionsOutstanding.delete(data.key)
+           this.renderUpdateEmitter.emit('update')
+         }
+       }
+@@ -164,25 +166,33 @@ class WorldRenderer {
+     // is always dispatched to the same worker
+     const hash = mod(Math.floor(pos.x / 16) + Math.floor(pos.y / 16) + Math.floor(pos.z / 16), this.workers.length)
+     this.workers[hash].postMessage({ type: 'dirty', x: pos.x, y: pos.y, z: pos.z, value })
+-    this.sectionsOutstanding.add(`${Math.floor(pos.x / 16) * 16},${Math.floor(pos.y / 16) * 16},${Math.floor(pos.z / 16) * 16}`)
++    const key = `${Math.floor(pos.x / 16) * 16},${Math.floor(pos.y / 16) * 16},${Math.floor(pos.z / 16) * 16}`
++    this.sectionsOutstanding.set(key, (this.sectionsOutstanding.get(key) ?? 0) + 1)
+   }
+ 
+-  // Listen for chunk rendering updates emitted if a worker finished a render and resolve if the number
+-  // of sections not rendered are 0
+-  waitForChunksToRender () {
++  // Resolves when no section is outstanding; with timeoutMs, rejects after that long and removes its listener
++  waitForChunksToRender (timeoutMs) {
+     return new Promise((resolve, reject) => {
+-      if (Array.from(this.sectionsOutstanding).length === 0) {
++      if (this.sectionsOutstanding.size === 0) {
+         resolve()
+         return
+       }
+ 
++      let timer
+       const updateHandler = () => {
+         if (this.sectionsOutstanding.size === 0) {
++          clearTimeout(timer)
+           this.renderUpdateEmitter.removeListener('update', updateHandler)
+           resolve()
+         }
+       }
+       this.renderUpdateEmitter.on('update', updateHandler)
++      if (timeoutMs) {
++        timer = setTimeout(() => {
++          this.renderUpdateEmitter.removeListener('update', updateHandler)
++          reject(new Error('timeout waiting for chunk meshing'))
++        }, timeoutMs)
++      }
+     })
+   }
+ }
