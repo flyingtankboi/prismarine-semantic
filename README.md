@@ -39,19 +39,24 @@ npm run example -- --world path/to/MyWorld_semantic --port 25565 --pos 120,-58.4
 `--pos` is the eye position in block coordinates. The bot is named `capture`. In code:
 
 ```js
-const { connect, createLens, stitch } = require('prismarine-semantic')
+const { connect } = require('prismarine-semantic')
 
-const cap = await connect({ port: 25565, version: '1.21.1', semanticWorldDir: 'path/to/MyWorld_semantic' })
+const cap = await connect({
+  port: 25565, version: '1.21.1', semanticWorldDir: 'path/to/MyWorld_semantic',
+  projection: 'pinhole', fov: 90, width: 320, height: 240 // or projection: 'fisheye', fov: 170, model: 'equidistant'
+})
 const pose = { x: 120, y: -58.4, z: 86, yaw: 0, pitch: 0 } // radians, mineflayer convention
 await cap.teleport(pose)
-const faces = await cap.renderFaces(pose) // { rgb: [5], semantic: [5], depth: [5] }
-
-const lens = createLens({ width: 320, height: 240, fov: 170, faceSize: 256 })
-const fisheye = stitch(faces, lens)
+const { rgb, semantic, depth } = await cap.render(pose)
 cap.close()
 ```
 
-`connect` also takes `viewDistance` (chunks meshed around the eye, default 5), `faceSize` (default 256) and `workers`.
+`projection: 'pinhole'` renders one perspective view at the requested horizontal `fov` (below 180 degrees). `'fisheye'`
+renders five cube faces and stitches them; `fov` spans the image circle and can go up to 270 degrees. Both give the same
+three outputs, with depth as distance along each pixel's ray.
+
+`connect` also takes `viewDistance` (chunks meshed around the eye, default 5), `faceSize` (cube face size for fisheye, default
+256) and `workers`. The example takes `--projection`, `--fov` and `--lens` too.
 
 The texture atlas that prismarine-viewer draws with ships in its npm package and is not part of this repository. To
 build one yourself from the Mojang assets in `minecraft-assets`, run `npm run prerender -- 1.21.1`. The output lands in
@@ -90,7 +95,7 @@ mineflayer is used unmodified.
 - The bot's chunk window is `(2 * viewDistance - 1)` chunks wide, so terrain is guaranteed out to
   `(viewDistance - 1) * 16` metres only.
 - Block classes are per block, so anything the semantic world does not label ends up as 255.
-- The fisheye lens must not reach behind the camera, which limits `fov` to roughly 270 degrees.
+- The fisheye lens must not reach behind the camera, which limits `fov` to 270 degrees.
 - mineflayer logs some `PartialReadError` messages when joining 1.21.1 servers. They did not affect the capture.
 
 ## Tests

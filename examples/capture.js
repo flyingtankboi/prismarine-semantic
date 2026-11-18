@@ -1,11 +1,11 @@
-// Captures a fisheye RGB | semantic | depth view at a position, as a PNG, or as a GIF when --frames is above 1 (a full turn).
-//   node examples/capture.js --world path/to/world_semantic --version 1.21.1 --port 25566 --pos 120,-58,86 [--frames 24] [--out view.png]
+// Captures an RGB | semantic | depth view at a position, as a PNG, or as a GIF when --frames is above 1 (a full turn).
+//   node examples/capture.js --world path/to/world_semantic --pos 120,-58.4,86 --projection fisheye --fov 170 --out view.png
 // The bot must be allowed to run /tp, so op it on the server first.
 const fs = require('fs')
 const { parseArgs } = require('util')
 const { PNG } = require('pngjs')
 const { GIFEncoder, quantize, applyPalette } = require('gifenc')
-const { connect, createLens, stitch } = require('..')
+const { connect } = require('..')
 
 const { values: a } = parseArgs({
   options: {
@@ -15,21 +15,39 @@ const { values: a } = parseArgs({
     port: { type: 'string', default: '25565' },
     pos: { type: 'string' },
     yaw: { type: 'string', default: '0' },
+    pitch: { type: 'string', default: '0' },
     frames: { type: 'string', default: '1' },
+    projection: { type: 'string', default: 'pinhole' },
+    fov: { type: 'string' },
+    lens: { type: 'string', default: 'equidistant' },
+    width: { type: 'string', default: '256' },
+    height: { type: 'string', default: '192' },
     out: { type: 'string' }
   }
 })
 if (!a.world || !a.pos) {
-  console.error('usage: node examples/capture.js --world <semantic world dir> --pos x,y,z [--version 1.21.1] [--host localhost] [--port 25565] [--yaw deg] [--frames 1] [--out file]')
+  console.error(`usage: node examples/capture.js --world <semantic world dir> --pos x,y,z
+  [--projection pinhole|fisheye] [--fov degrees] [--lens equidistant|equisolid|stereographic] [--width 256] [--height 192]
+  [--yaw deg] [--pitch deg] [--frames 1] [--version 1.21.1] [--host localhost] [--port 25565] [--out file]`)
   process.exit(1)
 }
 const [x, y, z] = a.pos.split(',').map(Number)
 const frames = Number(a.frames)
 const out = a.out ?? (frames > 1 ? 'view.gif' : 'view.png')
-const W = 256
-const H = 192
+const W = Number(a.width)
+const H = Number(a.height)
+const rad = deg => Number(deg) * Math.PI / 180
 
 const hex = c => [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16))
+
+// near is warm, far is cool; sky and pixels outside a fisheye circle are black
+const RAMP = [[255, 221, 87], [240, 120, 60], [160, 50, 120], [60, 40, 140], [20, 70, 160]]
+function depthColour (d) {
+  if (d === 0 || d === Infinity) return [0, 0, 0]
+  const t = Math.min(Math.sqrt(d / 60), 1) * (RAMP.length - 1)
+  const i = Math.min(Math.floor(t), RAMP.length - 2)
+  return RAMP[i].map((v, c) => Math.round(v + (RAMP[i + 1][c] - v) * (t - i)))
+}
 
 function panels (view, palette) {
   const rgba = new Uint8Array(3 * W * H * 4).fill(255)
@@ -40,24 +58,31 @@ function panels (view, palette) {
   for (let p = 0; p < W * H; p++) {
     put(0, p, view.rgb.subarray(p * 3, p * 3 + 3))
     put(1, p, palette.get(view.semantic[p]) ?? [0, 0, 0])
-    const d = view.depth[p]
-    const g = d === 0 ? 0 : Math.round(255 * (1 - Math.min(d, 50) / 50))
-    put(2, p, [g, g, g])
+    put(2, p, depthColour(view.depth[p]))
   }
   return rgba
 }
 
 async function main () {
-  const cap = await connect({ host: a.host, port: Number(a.port), version: a.version, semanticWorldDir: a.world })
+  const cap = await connect({
+    host: a.host,
+    port: Number(a.port),
+    version: a.version,
+    semanticWorldDir: a.world,
+    projection: a.projection,
+    fov: a.fov && Number(a.fov),
+    model: a.lens,
+    width: W,
+    height: H
+  })
   try {
     const palette = new Map(cap.legend.map(e => [e.id, hex(e.colour)]))
-    const lens = createLens({ width: W, height: H, fov: 170, faceSize: 256 })
     await cap.teleport({ x, y, z })
     const gif = GIFEncoder()
     let png
     for (let i = 0; i < frames; i++) {
-      const yaw = Number(a.yaw) * Math.PI / 180 + 2 * Math.PI * i / frames
-      const rgba = panels(stitch(await cap.renderFaces({ x, y, z, yaw }), lens), palette)
+      const yaw = rad(a.yaw) + 2 * Math.PI * i / frames
+      const rgba = panels(await cap.render({ x, y, z, yaw, pitch: rad(a.pitch) }), palette)
       if (frames === 1) {
         png = new PNG({ width: 3 * W, height: H })
         png.data = Buffer.from(rgba)

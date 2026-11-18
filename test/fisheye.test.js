@@ -27,6 +27,11 @@ test('edge pixels sample the side faces, with ray length above planar depth', ()
   assert.ok(out.depth[20 * 41 + 1] > 2)
 })
 
+test('a pinhole lens of 90 degrees across the width only needs the front face', () => {
+  const lens = createLens({ width: 40, height: 30, fov: 90, model: 'pinhole', span: 'width', faceSize })
+  assert.ok(stitch(faces, lens).semantic.every(s => s === 0))
+})
+
 test('a lens that sees behind the camera is rejected', () => {
   assert.throws(() => createLens({ width: 40, height: 40, fov: 300, span: 'width', faceSize }), /behind/)
 })
