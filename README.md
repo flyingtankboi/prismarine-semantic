@@ -125,6 +125,17 @@ the faces into a fisheye image, which is what `projection: 'fisheye'` does.
 
 *The five 90 degree cube faces the fisheye is stitched from. Rows: RGB, semantic, depth. Lake Merritt, Oakland. © OpenStreetMap contributors.*
 
+### Fisheye gallery
+
+RGB, semantic class and depth through different lenses and fields of view. The black corners lie outside the image
+circle: with `span: 'circle'` the `fov` spans the circle, and pixels outside it stay empty.
+
+| | |
+|---|---|
+| <img src="docs/fisheye/fisheye-manhattan.png" width="100%"><br><sub>Midtown Manhattan, New York. Equidistant, 180 degrees, street level. © OpenStreetMap contributors.</sub> | <img src="docs/fisheye/fisheye-shinjuku.png" width="100%"><br><sub>Shinjuku, Tokyo. Equisolid, 200 degrees, looking up 40 degrees. © OpenStreetMap contributors.</sub> |
+| <img src="docs/fisheye/fisheye-hongkong.png" width="100%"><br><sub>Central, Hong Kong. Stereographic, 170 degrees, looking up 65 degrees. © OpenStreetMap contributors.</sub> | <img src="docs/fisheye/fisheye-gangnam.png" width="100%"><br><sub>Gangnam, Seoul. Equidistant, 200 degrees, street level. © OpenStreetMap contributors.</sub> |
+| <img src="docs/fisheye/fisheye-paris.png" width="100%"><br><sub>Eiffel Tower and Champ de Mars, Paris. Equidistant, 180 degrees, from above looking down 50 degrees. © OpenStreetMap contributors.</sub> | <img src="docs/fisheye/fisheye-sydney.png" width="100%"><br><sub>Opera House and harbour, Sydney. Equisolid, 190 degrees, from above looking down 60 degrees. © OpenStreetMap contributors.</sub> |
+
 ## How the semantic labels work
 
 Labels are not rendered from the server. The twin world (`<name>_semantic`) has the same layout as the normal one,
